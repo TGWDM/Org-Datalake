@@ -1,0 +1,3 @@
+services:
+  minIO: # Object Store for emulating (S3/Blob)
+  
