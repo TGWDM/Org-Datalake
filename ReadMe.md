@@ -103,15 +103,33 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 
 ## Data model (clean layer)
 
-`clean.call_metadata` holds one row per call across all sources and companies:
+### Schemas
+
+**`clean.call_metadata`** holds one row per call across all sources and companies:
 
 - `call_id`: generated as `source_app || ':' || source_call_id`, so the same call always gets the same ID
 - `source_app`, `source_call_id`, `company_id`
+- `source_file`: the S3 object key the row was loaded from, for lineage
 - Timestamps (`start_time`, `end_time`, `answered_time`) stored as `timestamptz` in UTC
 - Durations in seconds (`call`, `hold`, `queue`, `wrap`, `total`) as `numeric(10,3)` with non-negative checks
 - `recording_uri` and `transcript_uri` pointing into the lake
 
-Rows that fail validation are intended to go to a quarantine table rather than being dropped.
+**`clean.call_quarantine`** holds rows that failed validation, so nothing is silently dropped:
+
+- `source_file` and `source_row_number` identify where the row came from
+- `raw_row`: the original row stored untouched as `jsonb`, so it can be reprocessed after a rule change
+- `reason`: a consistent failure code, for example `negative_duration`
+- `resolved` flag, plus `quarantined_at`
+- Unique on `(source_file, source_row_number)`, so reruns can't insert the same bad row twice
+
+**`clean.load_log`** records which files have been processed:
+
+- One row per file version, identified by `source_file` and `etag`
+- `status` (`succeeded` or `failed`), row counts (read, loaded, quarantined, duplicate) and timestamps
+- A file version can succeed only once, so unchanged files are skipped on rerun, while a replaced file (new etag) is processed again
+- Success rows are written in the same transaction as the inserts, so a file is either fully loaded and logged or not at all
+
+Duplicate calls (same `call_id`) are ignored on load for now. Switching to updates later is a change to the load query only.
 
 ## Security
 

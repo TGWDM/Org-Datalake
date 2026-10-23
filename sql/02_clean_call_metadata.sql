@@ -3,6 +3,7 @@ CREATE TABLE
         call_id text GENERATED ALWAYS AS (source_app || ':' || source_call_id) STORED,
         source_app text NOT NULL,
         source_call_id text NOT NULL,
+        source_file text NOT NULL,
         company_id text NOT NULL,
         start_time timestamptz NOT NULL,
         end_time timestamptz,
