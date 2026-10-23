@@ -1,5 +1,5 @@
 import boto3
-from s3config import buildRustClient
+from DLConfig import buildRustClient
 
 
 # list buckets
