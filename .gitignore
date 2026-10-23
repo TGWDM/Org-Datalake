@@ -7,3 +7,4 @@ sample_data/real/
 *.xlsx
 *.wav
 *.mp3
+.venv/

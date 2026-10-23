@@ -2,7 +2,7 @@
 
 A local-first data lake proof of concept, designed around AWS services and prototyped with Docker Compose. It ingests call recordings and call metadata exports, cleans them into typed tables, and exposes purpose-built tables for consumers.
 
-> **Status:** The local stack and the clean-layer schema are in place.<br>
+> **Completed:** The local stack and the clean-layer schema are in place.<br>
 > **Next Steps:** Create pipeline for processing data from the raw layer into the clean layer
 
 ## Architecture
@@ -131,3 +131,15 @@ For a production deployment on AWS, the intended controls are:
 - RDS in private subnets with encryption at rest, and row-level security if companies need isolation
 - CloudTrail and access logging, with retention rules for recordings
 - A lawful basis for recording calls under UK GDPR, with phone numbers masked where consumers don't need them
+
+## Pipelines
+
+### Python
+
+#### Dependecies
+
+| Package       | Usage                 |
+| ------------- | --------------------- |
+| boto3         | Accessing S3 buckets  |
+| psycopg       | Accessing Postgres    |
+| python-dotenv | Reading env variables |
