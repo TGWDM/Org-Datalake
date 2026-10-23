@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+res/
+sample_data/real/
+*.csv
+*.xlsx
+*.wav
+*.mp3

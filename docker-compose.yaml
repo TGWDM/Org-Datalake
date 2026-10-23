@@ -1,3 +1,82 @@
 services:
-  minIO: # Object Store for emulating (S3/Blob)
-  
+  postgres:
+    container_name: postgres
+    image: postgres:17
+    environment:
+      - POSTGRES_USER=${PG_USER}
+      - POSTGRES_PASSWORD=${PG_PW}
+      - POSTGRES_DB=${PG_DB}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - ./res/db:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  postgres-init:
+    image: postgres:17
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGUSER: ${PG_USER}
+      PGPASSWORD: ${PG_PW}
+      PGDATABASE: ${PG_DB}
+    volumes:
+      - ./sql:/sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for f in /sql/*.sql; do
+          echo "applying $$f"
+          psql -v ON_ERROR_STOP=1 -f "$$f"
+        done
+  rustfs:
+    container_name: rustfs
+    image: rustfs/rustfs:1.0.3
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_USER}
+      RUSTFS_SECRET_KEY: ${RUSTFS_PW}
+      RUSTFS_CONSOLE_ADDRESS: "0.0.0.0:9001"
+    ports:
+      - "127.0.0.1:9000:9000" # S3 API
+      - "127.0.0.1:9001:9001" # Console
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --fail http://127.0.0.1:9000/health/ready && curl --fail http://127.0.0.1:9001/rustfs/console/health",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  rustfs-init:
+    image: rustfs/rc:v0.1.36
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_USER}
+      RUSTFS_SECRET_KEY: ${RUSTFS_PW}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until /usr/bin/rc alias set rustfs http://rustfs:9000 "$${RUSTFS_ACCESS_KEY}" "$${RUSTFS_SECRET_KEY}"; do
+          sleep 2
+        done
+        for b in org-raw org-recordings org-clean; do
+          /usr/bin/rc ls rustfs/$$b >/dev/null 2>&1 || /usr/bin/rc mb rustfs/$$b
+        done
+
+volumes:
+  rustfs-data:
