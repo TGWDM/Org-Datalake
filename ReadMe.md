@@ -161,3 +161,4 @@ For a production deployment on AWS, the intended controls are:
 | boto3         | Accessing S3 buckets  |
 | psycopg       | Accessing Postgres    |
 | python-dotenv | Reading env variables |
+| pandas        | Acessing csv files    |
