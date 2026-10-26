@@ -18,7 +18,6 @@ CREATE TABLE
         agent_tel text,
         agent text,
         answered boolean NOT NULL,
-        recording_url text,
         recording_uri text,
         transcript_uri text,
         added_time timestamptz NOT NULL DEFAULT now (),

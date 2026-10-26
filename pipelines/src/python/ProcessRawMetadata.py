@@ -1,4 +1,4 @@
-from DLConfig import buildRustClient
+from DLConfig import buildRustClient, existsInS3
 from psycopg_pool import ConnectionPool
 import pandas as pd
 import io
@@ -9,11 +9,11 @@ import json
 s3 = buildRustClient()
 
 load_dotenv()
-rustUser = os.environ["RUSTFS_USER"]
-rustPW = os.environ["RUSTFS_PW"]
-pgUser = os.environ["PG_USER"]
-pgPW = os.environ["PG_PW"]
-pgName = os.environ["PG_DB"]
+rust_user = os.environ["RUSTFS_USER"]
+rust_pw = os.environ["RUSTFS_PW"]
+pg_user = os.environ["PG_USER"]
+pg_pw = os.environ["PG_PW"]
+pg_name = os.environ["PG_DB"]
 
 
 # list buckets
@@ -22,38 +22,37 @@ def listBuckets():
         print(bucket.get("Name"))
 
 
-def GetMetaDataAndSource():
+def getMetaDataAndSource():
     paginator = s3.get_paginator("list_objects_v2")
-    rawBuck = "org-raw"
-    basePath = "calls/"
+    raw_buck = "org-raw"
+    base_path = "calls/"
 
     # Get all sources
-    sourcePaths = []
+    source_paths = []
     sources = []
-    sourcePathsAndNames = []
+    source_paths_names = []
     # Search folder one step down
-    for pages in paginator.paginate(Bucket=rawBuck, Prefix=basePath, Delimiter="/"):
+    for pages in paginator.paginate(Bucket=raw_buck, Prefix=base_path, Delimiter="/"):
         # CommonPrefixes = Folders
         for page in pages.get("CommonPrefixes", []):
             # Get content type
-            sourcePaths.append(page["Prefix"])
-            name = page["Prefix"].removeprefix(basePath).rstrip("/")
+            source_paths.append(page["Prefix"])
+            name = page["Prefix"].removeprefix(base_path).rstrip("/")
             sources.append(name)
-            sourcePN = (page["Prefix"], name)
-            sourcePathsAndNames.append(sourcePN)
+            source_pn = (page["Prefix"], name)
+            source_paths_names.append(source_pn)
 
     # list each metadata by source
 
-    sourceNMetaPaths = []
-    for path, name in sourcePathsAndNames:
+    source_and_metapath = []
+    for path, name in source_paths_names:
         metaList = []
         srcMeta = f"{path}metadata/"
-        print(" \n srcMeta: " + name)
-        for page in paginator.paginate(Bucket=rawBuck, Prefix=srcMeta):
+        for page in paginator.paginate(Bucket=raw_buck, Prefix=srcMeta):
             for obj in page.get("Contents", []):
                 # Store source and path to file in a tuple
-                sourceNMetaPaths.append((name, obj["Key"]))
-    return sourceNMetaPaths
+                source_and_metapath.append((name, obj["Key"]))
+    return source_and_metapath
 
 
 def getTables():
@@ -64,35 +63,41 @@ def getTables():
             """)
             records = cur.fetchall()
         pgConn.commit()
-    print(records)
+
+
+def extractXC(mPath):
+    print("xcomm")
+
+
+def extractCXM(mPath):
+    print("connex")
+
+
+def extract8x8(mPath):
+    print("8x8")
 
 
 def processNPush(pool):
-    """
-    Extract columns from aircall
-    return the extract
-    """
-    sourceNMeta = GetMetaDataAndSource()
+    sourceNMeta = getMetaDataAndSource()
     for source, mPath in sourceNMeta:
         match source.lower():
             case "aircall":
-                ExtractAC(mPath, pool)
+                extractAC(mPath, pool, "aircall")
             case "xcom":
-                ExtractXC(mPath)
+                extractXC(mPath)
             case "cxm":
-                ExtractCXM(mPath)
+                extractCXM(mPath)
             case "8x8":
-                Extract8x8(mPath)
+                extract8x8(mPath)
             case _:
                 raise Exception("Invalid source type")
 
 
-def ExtractAC(mPath, pool):
-    acResp = s3.get_object(Bucket="org-raw", Key=mPath)
-    filename = os.path.basename(mPath)
-    print(filename)
+def extractAC(mPath, pool, source):
+    resp = s3.get_object(Bucket="org-raw", Key=mPath)
+    file_name = os.path.basename(mPath)
     dFrame = pd.read_csv(
-        io.BytesIO(acResp["Body"].read()),
+        io.BytesIO(resp["Body"].read()),
         usecols=[
             "Call Uuid",
             "Direction",
@@ -114,7 +119,7 @@ def ExtractAC(mPath, pool):
     # convert datetimes to timestamps with timezones
     cols = ["Created Time", "Ended Time", "Answered Time"]
     for c in cols:
-        dFrame[c] = dt_to_uk(dFrame[c])
+        dFrame[c] = dtToUk(dFrame[c])
     # clean duration columns
     duration_cols = ["In Call Duration", "Duration (in seconds)"]
     for c in duration_cols:
@@ -154,17 +159,17 @@ def ExtractAC(mPath, pool):
         axis=1,
     ).tolist()
     row_nums = (bad_rows.index + 2).tolist()
-    filenames = [filename] * len(bad_rows)
-    apps = ["aircall"] * len(bad_rows)
+    file_names = [file_name] * len(bad_rows)
+    apps = [source] * len(bad_rows)
     companies = ["bi"] * len(bad_rows)
 
-    bad_params = list(zip(filenames, row_nums, raw_jsons, reasons, apps, companies))
+    bad_params = list(zip(file_names, row_nums, raw_jsons, reasons, apps, companies))
 
     rows = [
         (
-            "aircall",
+            source,
             row["Call Uuid"],
-            filename,
+            file_name,
             "bi",
             row["Created Time"],
             row["Ended Time"],
@@ -176,6 +181,7 @@ def ExtractAC(mPath, pool):
             row["To"],
             row["Full Name"],
             row["answered"],
+            getRecordingPath(row["Created Time"], source, row["Call Uuid"]),
         )
         for _, row in good_rows.iterrows()
     ]
@@ -197,10 +203,11 @@ def ExtractAC(mPath, pool):
                     customer_tel,
                     agent_tel,
                     agent,
-                    answered
+                    answered,
+                    recording_uri
                 ) VALUES(
                     %s,%s, %s, %s, %s, %s, %s, 
-                    %s,%s, %s, %s, %s, %s, %s
+                    %s,%s, %s, %s, %s, %s, %s,%s
                 )
                 """,
                 rows,
@@ -221,21 +228,20 @@ def ExtractAC(mPath, pool):
                     """,
                     bad_params,
                 )
+            print(
+                f"{file_name}: Inserted {len(rows)} rows, Quarantined {len(bad_rows)} rows"
+            )
 
 
-def ExtractXC(mPath):
-    print("xcomm")
+def getRecordingPath(start_time, source, file_name):
+    # Will check using Cron job later
+    if pd.isna(start_time):
+        return ""
+    date_path = start_time.strftime("%Y/%m/%d")
+    return f"calls/{source}/{date_path}/{file_name}.mp3"
 
 
-def ExtractCXM(mPath):
-    print("connex")
-
-
-def Extract8x8(mPath):
-    print("8x8")
-
-
-def dt_to_uk(s):
+def dtToUk(s):
     s = pd.to_datetime(s, dayfirst=True, format="mixed", errors="coerce")
     return s.dt.tz_localize(
         "Europe/London", ambiguous="infer", nonexistent="shift_forward"
@@ -243,7 +249,7 @@ def dt_to_uk(s):
 
 
 with ConnectionPool(
-    conninfo=f"dbname={pgName} user={pgUser} password={pgPW} host=127.0.0.1 port=5433",
+    conninfo=f"dbname={pg_name} user={pg_user} password={pg_pw} host=127.0.0.1 port=5433",
     min_size=1,
     max_size=5,
     open=True,

@@ -1,4 +1,5 @@
 import boto3
+import botocore
 from botocore.config import Config
 import psycopg
 from dotenv import load_dotenv
@@ -26,16 +27,11 @@ def buildRustClient():
     return s3
 
 
-def getTables():
-    with psycopg.connect(
-        f"dbname={pgName} user={pgUser} password={pgPW} host=127.0.0.1 port=5433"
-    ) as pgConn:
-        with pgConn.cursor() as cur:
-            cur.execute("""
-                SELECT table_name FROM information_schema.tables WHERE table_schema = 'clean'
-            """)
-            records = cur.fetchall()
-            print(records)
-
-
-getTables()
+def existsInS3(s3, buck_name, file_path):
+    try:
+        s3.head_object(Bucket=buck_name, Key=file_path)
+        return True
+    except botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        raise
